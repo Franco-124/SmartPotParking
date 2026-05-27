@@ -1,9 +1,12 @@
 """
 Módulo de autenticación — registro y verificación de usuarios.
 
+Roles:
+    admin : acceso completo al dashboard y analítica.
+    user  : solo vista de ocupación y sensor CO.
+
 Usa PBKDF2-HMAC-SHA256 con salt aleatorio de 32 bytes y 260 000 iteraciones
 (recomendación OWASP 2023) sin dependencias externas: solo stdlib.
-Las credenciales se almacenan en la tabla `users` del mismo parking.db.
 """
 
 import hashlib
@@ -14,6 +17,8 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from settings import DB_PATH
+
+ROLES = ("admin", "user")
 
 
 def init_users_table() -> None:
@@ -27,25 +32,33 @@ def init_users_table() -> None:
                 email      TEXT    NOT NULL UNIQUE,
                 pwd_hash   TEXT    NOT NULL,
                 salt       TEXT    NOT NULL,
+                role       TEXT    NOT NULL DEFAULT 'user',
                 created_at TEXT    NOT NULL
             )
             """
         )
+        # Migración no destructiva: agrega columna role si ya existe la tabla sin ella.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
 def _hash(password: str, salt: bytes) -> str:
-    """Deriva una clave de la contraseña usando PBKDF2-HMAC-SHA256."""
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000).hex()
 
 
-def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
+def register_user(
+    username: str, email: str, password: str, role: str = "user"
+) -> tuple[bool, str]:
     """
     Registra un nuevo usuario.
     Retorna (True, msg_ok) o (False, msg_error).
     """
     username = username.strip()
     email    = email.strip().lower()
+    role     = role if role in ROLES else "user"
 
     if not username:
         return False, "El nombre de usuario no puede estar vacío."
@@ -62,9 +75,9 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                """INSERT INTO users (username, email, pwd_hash, salt, created_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (username, email, pwd_hash, salt.hex(),
+                """INSERT INTO users (username, email, pwd_hash, salt, role, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (username, email, pwd_hash, salt.hex(), role,
                  datetime.now().isoformat(timespec="seconds")),
             )
             conn.commit()
@@ -78,25 +91,23 @@ def register_user(username: str, email: str, password: str) -> tuple[bool, str]:
         return False, "No se pudo crear la cuenta. Intenta de nuevo."
 
 
-def login_user(username: str, password: str) -> tuple[bool, str]:
+def login_user(username: str, password: str) -> tuple[bool, str, str]:
     """
     Verifica credenciales.
-    Retorna (True, msg_ok) o (False, msg_error).
+    Retorna (True, msg_ok, role) o (False, msg_error, "").
     Tiempo constante para ambas ramas: evita timing attacks básicos.
     """
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute(
-            "SELECT pwd_hash, salt FROM users WHERE username = ?",
+            "SELECT pwd_hash, salt, role FROM users WHERE username = ?",
             (username.strip(),),
         ).fetchone()
 
-    # Siempre se hace el hash (tiempo constante) aunque el usuario no exista.
-    dummy_salt = b"\x00" * 32
+    dummy_salt  = b"\x00" * 32
     stored_hash = row[0] if row else ""
     salt        = bytes.fromhex(row[1]) if row else dummy_salt
     computed    = _hash(password, salt)
 
     if row and computed == stored_hash:
-        return True, "Inicio de sesión exitoso."
-    # Mensaje genérico: no revela si el usuario existe o no.
-    return False, "Usuario o contraseña incorrectos."
+        return True, "Inicio de sesión exitoso.", row[2]
+    return False, "Usuario o contraseña incorrectos.", ""

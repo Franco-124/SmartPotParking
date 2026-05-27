@@ -288,9 +288,10 @@ def _auth_page() -> None:
                 if not username or not password:
                     st.error("Completa todos los campos.")
                 else:
-                    ok, msg = login_user(username, password)
+                    ok, msg, role = login_user(username, password)
                     if ok:
                         st.session_state["user"] = username.strip()
+                        st.session_state["role"] = role
                         st.session_state["session_start"] = datetime.now().isoformat(
                             timespec="seconds"
                         )
@@ -306,6 +307,13 @@ def _auth_page() -> None:
                                           placeholder="Mínimo 6 caracteres")
                 confirm   = st.text_input("Confirmar contraseña", type="password",
                                           placeholder="Repite la contraseña")
+                new_role  = st.selectbox(
+                    "Tipo de cuenta",
+                    options=["user", "admin"],
+                    format_func=lambda r: "👤 Usuario — solo vista de ocupación y CO"
+                                          if r == "user"
+                                          else "🔑 Administrador — acceso completo",
+                )
                 submitted_r = st.form_submit_button(
                     "Crear cuenta", use_container_width=True, type="primary"
                 )
@@ -315,7 +323,7 @@ def _auth_page() -> None:
                 elif new_pass != confirm:
                     st.error("Las contraseñas no coinciden.")
                 else:
-                    ok, msg = register_user(new_user, new_email, new_pass)
+                    ok, msg = register_user(new_user, new_email, new_pass, new_role)
                     if ok:
                         st.success(msg)
                         st.info("Ya puedes iniciar sesión en la pestaña anterior.")
@@ -340,6 +348,9 @@ if "user" not in st.session_state:
 
 if "session_start" not in st.session_state:
     st.session_state["session_start"] = datetime.now().isoformat(timespec="seconds")
+
+_role    = st.session_state.get("role", "user")
+_is_admin = _role == "admin"
 
 # ── Leer y persistir ───────────────────────────────────────────────────────
 reading   = get_reading()
@@ -423,9 +434,13 @@ with st.sidebar:
       <div style="color:#555;font-size:10px;text-transform:uppercase;
           letter-spacing:1.5px;margin-bottom:6px;">Sesión activa</div>
       <div style="color:#55efc4;font-size:15px;font-weight:700;">
-        👤 {st.session_state['user']}
+        {"🔑" if _is_admin else "👤"} {st.session_state['user']}
       </div>
-      <div style="color:#444;font-size:11px;margin-top:4px;">
+      <div style="color:#888;font-size:11px;margin-top:3px;background:{"rgba(255,215,0,0.08)" if _is_admin else "rgba(255,255,255,0.04)"};
+          padding:3px 8px;border-radius:6px;display:inline-block;">
+        {"Administrador" if _is_admin else "Usuario"}
+      </div>
+      <div style="color:#444;font-size:11px;margin-top:6px;">
         Desde: {st.session_state.get('session_start','—')}
       </div>
     </div>
@@ -452,8 +467,8 @@ with st.sidebar:
     st.divider()
 
     if st.button("🚪 Cerrar sesión", use_container_width=True):
-        for k in ["user", "session_start", "estado_actual", "estado_desde",
-                  "entradas", "salidas"]:
+        for k in ["user", "role", "session_start", "estado_actual",
+                  "estado_desde", "entradas", "salidas"]:
             st.session_state.pop(k, None)
         st.rerun()
 
@@ -463,7 +478,11 @@ st.title("🅿️ SmartSpot Analytics")
 st.caption("Sistema de monitoreo IoT en tiempo real · ESP32 + HC-SR04 × 4 + MQ7")
 st.divider()
 
-tab1, tab2 = st.tabs(["🅿️ Monitor en Vivo", "📊 Analítica de Ocupación"])
+_tabs = (["🅿️ Monitor en Vivo", "📊 Analítica de Ocupación"]
+         if _is_admin else ["🅿️ Monitor en Vivo"])
+_tab_objects = st.tabs(_tabs)
+tab1 = _tab_objects[0]
+tab2 = _tab_objects[1] if _is_admin else None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -502,32 +521,35 @@ with tab1:
     </div>
     """)
 
-    st.divider()
-
-    # Métricas numéricas
-    st.subheader("📏 Métricas en Tiempo Real")
-    col_a, col_b, col_c, col_d = st.columns(4)
-    with col_a:
-        st.metric(f"{CELDA_A}", f"{dist_a} cm",
-                  delta=f"{'OCUPADO' if ocupado_a else 'LIBRE'}")
-        st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_A)}`")
-    with col_b:
-        st.metric(f"{CELDA_B}", f"{dist_b} cm",
-                  delta=f"{'OCUPADO' if ocupado_b else 'LIBRE'}")
-        st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_B)}`")
-    with col_c:
-        st.metric(f"{CELDA_C}", f"{dist_c} cm",
-                  delta=f"{'OCUPADO' if ocupado_c else 'LIBRE'}")
-        st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_C)}`")
-    with col_d:
-        st.metric(f"{CELDA_D}", f"{dist_d} cm",
-                  delta=f"{'OCUPADO' if ocupado_d else 'LIBRE'}")
-        st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_D)}`")
+    if _is_admin:
+        st.divider()
+        st.subheader("📏 Métricas en Tiempo Real")
+        col_a, col_b, col_c, col_d = st.columns(4)
+        with col_a:
+            st.metric(f"{CELDA_A}", f"{dist_a} cm",
+                      delta=f"{'OCUPADO' if ocupado_a else 'LIBRE'}")
+            st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_A)}`")
+        with col_b:
+            st.metric(f"{CELDA_B}", f"{dist_b} cm",
+                      delta=f"{'OCUPADO' if ocupado_b else 'LIBRE'}")
+            st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_B)}`")
+        with col_c:
+            st.metric(f"{CELDA_C}", f"{dist_c} cm",
+                      delta=f"{'OCUPADO' if ocupado_c else 'LIBRE'}")
+            st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_C)}`")
+        with col_d:
+            st.metric(f"{CELDA_D}", f"{dist_d} cm",
+                      delta=f"{'OCUPADO' if ocupado_d else 'LIBRE'}")
+            st.caption(f"Estado hace: `{_tiempo_en_estado(CELDA_D)}`")
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# TAB 2 — ANALÍTICA
+# TAB 2 — ANALÍTICA (solo admin)
 # ══════════════════════════════════════════════════════════════════════════
+if not tab2:
+    time.sleep(REFRESH_INTERVAL)
+    st.rerun()
+
 with tab2:
 
     stats = get_occupation_stats(since=st.session_state["session_start"])
@@ -648,6 +670,7 @@ with tab2:
         st.plotly_chart(fig_dist, use_container_width=True, key="chart_dist")
 
 
-# ── Refresco automático ────────────────────────────────────────────────────
+# ── Refresco automático (admin llega hasta aquí) ──────────────────────────
 time.sleep(REFRESH_INTERVAL)
 st.rerun()
+
