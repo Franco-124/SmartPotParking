@@ -349,17 +349,30 @@ if "user" not in st.session_state:
 if "session_start" not in st.session_state:
     st.session_state["session_start"] = datetime.now().isoformat(timespec="seconds")
 
-_role    = st.session_state.get("role", "user")
+_role     = st.session_state.get("role", "user")
 _is_admin = _role == "admin"
 
+# ── Cerrar sesión — ANTES de get_reading() para que el click no se bloquee ─
+if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True, key="logout"):
+    for k in ["user", "role", "session_start", "estado_actual",
+              "estado_desde", "entradas", "salidas"]:
+        st.session_state.pop(k, None)
+    st.rerun()
+
 # ── Leer y persistir ───────────────────────────────────────────────────────
-reading   = get_reading()
-ts        = reading["timestamp"]
-dist_a    = reading["puesto_a"]
-dist_b    = reading["puesto_b"]
-dist_c    = reading["puesto_c"]
-dist_d    = reading["puesto_d"]
-co_raw    = reading["co_raw"]
+reading = get_reading()
+if reading is None:
+    # Sin dato válido en este ciclo — reintenta en 0.5 s sin bloquear la UI
+    time.sleep(0.5)
+    st.rerun()
+
+_ahora = datetime.now()
+ts     = reading["timestamp"]
+dist_a = reading["puesto_a"]
+dist_b = reading["puesto_b"]
+dist_c = reading["puesto_c"]
+dist_d = reading["puesto_d"]
+co_raw = reading["co_raw"]
 ocupado_a = dist_a <= UMBRAL_OCUPACION
 ocupado_b = dist_b <= UMBRAL_OCUPACION
 ocupado_c = dist_c <= UMBRAL_OCUPACION
@@ -372,7 +385,6 @@ insert_reading(CELDA_D, dist_d, ts)
 insert_co_reading(co_raw, ts)
 
 # ── Tracking de estados y rotación ────────────────────────────────────────
-_ahora = datetime.now()
 _estado_actual = {
     CELDA_A: ocupado_a, CELDA_B: ocupado_b,
     CELDA_C: ocupado_c, CELDA_D: ocupado_d,
@@ -466,12 +478,6 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🚪 Cerrar sesión", use_container_width=True):
-        for k in ["user", "role", "session_start", "estado_actual",
-                  "estado_desde", "entradas", "salidas"]:
-            st.session_state.pop(k, None)
-        st.rerun()
-
 
 # ── Header ─────────────────────────────────────────────────────────────────
 st.title("🅿️ SmartSpot Analytics")
@@ -547,7 +553,7 @@ with tab1:
 # TAB 2 — ANALÍTICA (solo admin)
 # ══════════════════════════════════════════════════════════════════════════
 if not tab2:
-    time.sleep(REFRESH_INTERVAL)
+    time.sleep(0.1)
     st.rerun()
 
 with tab2:
@@ -670,7 +676,7 @@ with tab2:
         st.plotly_chart(fig_dist, use_container_width=True, key="chart_dist")
 
 
-# ── Refresco automático (admin llega hasta aquí) ──────────────────────────
-time.sleep(REFRESH_INTERVAL)
+# ── Refresco automático ────────────────────────────────────────────────────
+time.sleep(0.1)   # ventana mínima para que Streamlit procese clicks
 st.rerun()
 

@@ -57,16 +57,15 @@ def get_source() -> str:
     return "serial"
 
 
-def get_reading() -> dict:
+def get_reading() -> dict | None:
     """
-    Lee una línea del ESP32 y retorna:
-        puesto_a/b/c/d: float (cm), co_raw: int, timestamp: str ISO-8601
-    Bloquea hasta recibir una línea válida DATA,... del puerto serie.
+    Lee hasta 10 líneas del ESP32 buscando una válida DATA,...
+    Retorna el dict con los valores o None si no llegó dato válido.
     """
-    ts = datetime.now().isoformat(timespec="seconds")
-    while True:
+    for _ in range(10):
         line = _ser.readline().decode("utf-8", errors="ignore")
         parsed = _parse_line(line)
         if parsed:
-            parsed["timestamp"] = ts
+            parsed["timestamp"] = datetime.now().isoformat(timespec="seconds")
             return parsed
+    return None

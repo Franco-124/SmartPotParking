@@ -22,14 +22,14 @@ CELDA_D: str = NOMBRES_CELDAS[3]
 HISTORICO_N: int = 100
 
 # Intervalo de refresco del dashboard en segundos.
-REFRESH_INTERVAL: float = 1.0
+REFRESH_INTERVAL: float = 0.0
 
 # ── Puerto serie del ESP32 ─────────────────────────────────────────────────
 # Windows: "COM3", "COM4", etc.  Linux/Mac: "/dev/ttyUSB0", "/dev/ttyACM0"
 # Si se deja vacío ("") source.py intentará auto-detectar el puerto.
 SERIAL_PORT:    str   = "COM11"
 SERIAL_BAUD:    int   = 115200
-SERIAL_TIMEOUT: float = 3.0
+SERIAL_TIMEOUT: float = 1.0
 
 # ── Sensor MQ7 — CO (Monóxido de Carbono) ─────────────────────────────────
 # Umbrales sobre el valor ADC crudo que envía el ESP32.
