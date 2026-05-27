@@ -15,7 +15,7 @@ from settings import DB_PATH, UMBRAL_OCUPACION
 
 
 def init_db() -> None:
-    """Crea la tabla lecturas si no existe. Idempotente: seguro llamarlo al inicio."""
+    """Crea las tablas si no existen. Idempotente."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -27,11 +27,22 @@ def init_db() -> None:
             )
             """
         )
+        # Tabla separada para CO: es una lectura ambiental global,
+        # no pertenece a ningún puesto específico.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS co_lecturas (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                co_raw    INTEGER NOT NULL,
+                timestamp TEXT    NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
 def insert_reading(puesto: str, distancia: float, timestamp: str) -> None:
-    """Inserta una lectura de sensor. puesto debe coincidir con NOMBRES_CELDAS."""
+    """Inserta una lectura de distancia. puesto debe coincidir con NOMBRES_CELDAS."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO lecturas (puesto, distancia, timestamp) VALUES (?, ?, ?)",
@@ -40,11 +51,21 @@ def insert_reading(puesto: str, distancia: float, timestamp: str) -> None:
         conn.commit()
 
 
+def insert_co_reading(co_raw: int, timestamp: str) -> None:
+    """Inserta una lectura del sensor MQ7."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO co_lecturas (co_raw, timestamp) VALUES (?, ?)",
+            (co_raw, timestamp),
+        )
+        conn.commit()
+
+
 def get_last_n_readings(n: int = 100) -> List[Tuple[str, float, str]]:
     """
-    Últimas n lecturas en orden cronológico (más antiguo primero).
-    La subconsulta toma los n más recientes por id DESC y luego los reordena
-    ASC para que el eje X del gráfico vaya de izquierda (pasado) a derecha (presente).
+    Últimas n lecturas de distancia en orden cronológico (más antiguo primero).
+    Subconsulta: toma los n más recientes por id DESC y reordena ASC para
+    que el eje X del gráfico vaya de izquierda (pasado) a derecha (presente).
     """
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
@@ -63,16 +84,29 @@ def get_last_n_readings(n: int = 100) -> List[Tuple[str, float, str]]:
     return rows
 
 
+def get_last_co_readings(n: int = 100) -> List[Tuple[int, str]]:
+    """Últimas n lecturas de CO en orden cronológico (más antiguo primero)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT co_raw, timestamp
+            FROM (
+                SELECT co_raw, timestamp, id
+                FROM co_lecturas
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            ORDER BY id ASC
+            """,
+            (n,),
+        ).fetchall()
+    return rows
+
+
 def get_occupation_stats(since: str | None = None) -> dict:
     """
-    Cuenta lecturas OCUPADO / LIBRE por celda (1 lectura ≈ 1 segundo de observación).
-
-    since: timestamp ISO-8601 para limitar el análisis a la sesión actual.
-           Si es None, acumula todo el historial de la DB.
-
-    Retorna dict con clave = nombre de puesto:
-        {"Puesto A": {"ocupado": int, "libre": int}, "Puesto B": {...}}
-    Las celdas sin datos retornan {"ocupado": 0, "libre": 0}.
+    Cuenta lecturas OCUPADO / LIBRE por celda (1 lectura ≈ 1 segundo).
+    since: timestamp ISO-8601 para limitar al período de la sesión actual.
     """
     where = "WHERE timestamp >= :since" if since else ""
     params: dict = {"umbral": UMBRAL_OCUPACION}
@@ -92,8 +126,6 @@ def get_occupation_stats(since: str | None = None) -> dict:
             params,
         ).fetchall()
 
-    # Retornar siempre la estructura completa aunque la DB esté vacía o no tenga
-    # aún lecturas de alguna celda (evita KeyError en app.py al inicio de sesión).
     result: dict = {}
     for puesto, ocupado, libre in rows:
         result[puesto] = {"ocupado": ocupado or 0, "libre": libre or 0}

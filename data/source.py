@@ -1,72 +1,72 @@
 """
-Abstracción de fuente de datos.
+Fuente de datos — solo puerto serie.
 
-PRINCIPIO DE DISEÑO:
-get_reading() es el ÚNICO punto de integración con el hardware.
-Todo el sistema (app.py, database.py) consume exclusivamente esta función.
-Al conectar el ESP32, reemplaza SOLO el cuerpo de get_reading() — nada más.
+FORMATO DEL ESP32:
+    DATA,<dist_a>,<dist_b>,<dist_c>,<dist_d>,<co_raw>
+    Ejemplo: DATA,12.35,6.86,0.03,999.00,478
 
-── INTEGRACIÓN ESP32 ──────────────────────────────────────────────────────────
-LÍNEA A MODIFICAR: cuerpo de get_reading() a partir del comentario "# ← SERIAL".
-
-Ejemplo con pyserial (agregar 'pyserial' a requirements.txt):
-
-    import serial
-    _ser = serial.Serial("COM3", 115200, timeout=2)  # ajusta puerto y baudrate
-
-    def get_reading() -> dict:  # ← SERIAL: reemplaza desde aquí
-        raw = _ser.readline().decode().strip()   # ESP32 envía "12.3,8.7\\n"
-        a, b = map(float, raw.split(","))
-        return {
-            "puesto_a": a,
-            "puesto_b": b,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-        }
-──────────────────────────────────────────────────────────────────────────────
+    - dist_*  : distancia en cm (999.00 = fuera de rango del HC-SR04)
+    - co_raw  : valor ADC crudo del sensor MQ7 (CO)
 """
 
-import random
-import time
 from datetime import datetime
 
-# Parámetros del ciclo simulado.
-# Son constantes de implementación del mock, no del dominio,
-# por eso viven aquí y no en config.py: cuando se active el serial son irrelevantes.
-_OCUPADO_S: float = 8.0    # segundos con vehículo presente → distancia corta
-_LIBRE_S:   float = 5.0    # segundos con celda vacía       → distancia larga
-_CICLO:     float = _OCUPADO_S + _LIBRE_S   # 13 s por ciclo completo
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# Puesto B arranca desplazado 6 s respecto a Puesto A.
-# Con este offset, durante la mayor parte del ciclo ambos puestos están en
-# estados contrarios, haciendo visibles OCUPADO y LIBRE simultáneamente.
-_B_OFFSET: float = 6.0
+from settings import SERIAL_PORT, SERIAL_BAUD, SERIAL_TIMEOUT
 
-_RANGO_OCUPADO = (5.0, 9.0)     # distancias con vehículo (≤ umbral 10 cm)
-_RANGO_LIBRE   = (12.0, 30.0)   # distancias sin vehículo (> umbral 10 cm)
+# ── Conexión serie (singleton de módulo) ───────────────────────────────────
+
+_ser = None
 
 
-def _dist_por_fase(fase: float) -> float:
-    """Retorna una distancia aleatoria según la fase actual del ciclo."""
-    lo, hi = _RANGO_OCUPADO if fase < _OCUPADO_S else _RANGO_LIBRE
-    return round(random.uniform(lo, hi), 1)
+def _init_serial() -> None:
+    global _ser
+    import serial as _pyserial
+    port = SERIAL_PORT
+    _ser = _pyserial.Serial(port, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
+    print(f"[SmartSpot] Puerto serie conectado: {port} @ {SERIAL_BAUD} baud")
+
+
+_init_serial()
+
+
+# ── Parser ─────────────────────────────────────────────────────────────────
+
+def _parse_line(line: str) -> dict | None:
+    parts = line.strip().split(",")
+    if len(parts) != 6 or parts[0] != "DATA":
+        return None
+    try:
+        return {
+            "puesto_a": float(parts[1]),
+            "puesto_b": float(parts[2]),
+            "puesto_c": float(parts[3]),
+            "puesto_d": float(parts[4]),
+            "co_raw":   int(float(parts[5])),
+        }
+    except ValueError:
+        return None
+
+
+# ── API pública ────────────────────────────────────────────────────────────
+
+def get_source() -> str:
+    return "serial"
 
 
 def get_reading() -> dict:
     """
-    Retorna la lectura actual de ambos sensores.
-
-    Contrato de retorno — invariante para app.py independientemente de la fuente:
-        {
-            "puesto_a": float,   # distancia en cm del sensor A
-            "puesto_b": float,   # distancia en cm del sensor B
-            "timestamp": str     # ISO-8601, precisión de segundos
-        }
-
-    # ← SERIAL: reemplaza el cuerpo de esta función al conectar el ESP32.
+    Lee una línea del ESP32 y retorna:
+        puesto_a/b/c/d: float (cm), co_raw: int, timestamp: str ISO-8601
+    Bloquea hasta recibir una línea válida DATA,... del puerto serie.
     """
-    t = time.time()
-    return {
-        "puesto_a": _dist_por_fase(t % _CICLO),
-        "puesto_b": _dist_por_fase((t + _B_OFFSET) % _CICLO),
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-    }
+    ts = datetime.now().isoformat(timespec="seconds")
+    while True:
+        line = _ser.readline().decode("utf-8", errors="ignore")
+        parsed = _parse_line(line)
+        if parsed:
+            parsed["timestamp"] = ts
+            return parsed
