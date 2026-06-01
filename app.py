@@ -25,7 +25,7 @@ from data.database import (
     get_occupation_stats, init_db,
     insert_co_reading, insert_reading,
 )
-from data.source import get_reading
+from data.source import get_reading, get_source
 from data.auth import init_users_table, login_user, register_user
 
 
@@ -460,7 +460,7 @@ with st.sidebar:
     <div style="color:#555;font-size:10px;text-transform:uppercase;
         letter-spacing:1.5px;margin-bottom:8px;">Sistema</div>
     <div style="color:#888;font-size:12px;line-height:1.9;">
-      <span style="color:#55efc4;">🔌 ESP32 — Puerto Serie</span><br>
+      {"<span style='color:#f0a500;'>🎭 DEMO — datos simulados</span>" if get_source() == "demo" else "<span style='color:#55efc4;'>🔌 ESP32 — Puerto Serie</span>"}<br>
       📡 Distancia: HC-SR04 × 4<br>
       💨 Aire: MQ7 (CO)<br>
       ⏱ Refresco: {REFRESH_INTERVAL:.0f} s<br>

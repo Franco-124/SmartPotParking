@@ -24,6 +24,11 @@ HISTORICO_N: int = 100
 # Intervalo de refresco del dashboard en segundos.
 REFRESH_INTERVAL: float = 0.0
 
+# ── Modo demo (sin hardware) ───────────────────────────────────────────────
+# True  → datos simulados para capturas / presentaciones
+# False → lee del puerto serie real (producción)
+DEMO_MODE: bool = True
+
 # ── Puerto serie del ESP32 ─────────────────────────────────────────────────
 # Windows: "COM3", "COM4", etc.  Linux/Mac: "/dev/ttyUSB0", "/dev/ttyACM0"
 # Si se deja vacío ("") source.py intentará auto-detectar el puerto.

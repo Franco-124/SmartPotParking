@@ -1,36 +1,58 @@
 """
-Fuente de datos — solo puerto serie.
+Fuente de datos.
+
+DEMO_MODE = True  → datos simulados (sin hardware)
+DEMO_MODE = False → lee del puerto serie del ESP32
 
 FORMATO DEL ESP32:
     DATA,<dist_a>,<dist_b>,<dist_c>,<dist_d>,<co_raw>
-    Ejemplo: DATA,12.35,6.86,0.03,999.00,478
-
-    - dist_*  : distancia en cm (999.00 = fuera de rango del HC-SR04)
-    - co_raw  : valor ADC crudo del sensor MQ7 (CO)
 """
 
+import random
+import time
 from datetime import datetime
 
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from settings import SERIAL_PORT, SERIAL_BAUD, SERIAL_TIMEOUT
+from settings import DEMO_MODE, SERIAL_PORT, SERIAL_BAUD, SERIAL_TIMEOUT
 
-# ── Conexión serie (singleton de módulo) ───────────────────────────────────
+# ── Conexión serie (solo si no es modo demo) ───────────────────────────────
 
 _ser = None
 
-
-def _init_serial() -> None:
-    global _ser
+if not DEMO_MODE:
     import serial as _pyserial
-    port = SERIAL_PORT
-    _ser = _pyserial.Serial(port, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
-    print(f"[SmartSpot] Puerto serie conectado: {port} @ {SERIAL_BAUD} baud")
+    _ser = _pyserial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
+    print(f"[SmartSpot] Puerto serie conectado: {SERIAL_PORT} @ {SERIAL_BAUD} baud")
+else:
+    print("[SmartSpot] DEMO MODE activo — usando datos simulados.")
 
 
-_init_serial()
+# ── Mock ───────────────────────────────────────────────────────────────────
+
+_OCUPADO_S     = 8.0
+_LIBRE_S       = 5.0
+_CICLO         = _OCUPADO_S + _LIBRE_S
+_OFFSETS       = (0.0, 6.0, 3.0, 10.0)
+
+
+def _mock_reading() -> dict:
+    t = time.time()
+    def dist(offset: float) -> float:
+        fase = (t + offset) % _CICLO
+        lo, hi = (5.0, 9.0) if fase < _OCUPADO_S else (12.0, 30.0)
+        return round(random.uniform(lo, hi), 1)
+
+    return {
+        "puesto_a":  dist(_OFFSETS[0]),
+        "puesto_b":  dist(_OFFSETS[1]),
+        "puesto_c":  dist(_OFFSETS[2]),
+        "puesto_d":  dist(_OFFSETS[3]),
+        "co_raw":    int(random.uniform(300, 750)),
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 # ── Parser ─────────────────────────────────────────────────────────────────
@@ -54,14 +76,14 @@ def _parse_line(line: str) -> dict | None:
 # ── API pública ────────────────────────────────────────────────────────────
 
 def get_source() -> str:
-    return "serial"
+    return "demo" if DEMO_MODE else "serial"
 
 
 def get_reading() -> dict | None:
-    """
-    Lee hasta 10 líneas del ESP32 buscando una válida DATA,...
-    Retorna el dict con los valores o None si no llegó dato válido.
-    """
+    if DEMO_MODE:
+        time.sleep(0.8)          # simula cadencia del ESP32
+        return _mock_reading()
+
     for _ in range(10):
         line = _ser.readline().decode("utf-8", errors="ignore")
         parsed = _parse_line(line)
